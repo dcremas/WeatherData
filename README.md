@@ -1,7 +1,7 @@
 ### Title: Weather Data Portfolio Project, Full Data Pipeline.
 
 *To see the full codebase for this project:*
-[Link to my github account](https://github.com/dcremas/weather_data)
+[Link to my github account](https://github.com/dcremas/WeatherData)
 
 #### Description:
 
