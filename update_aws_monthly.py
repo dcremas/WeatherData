@@ -11,7 +11,7 @@ import shared_funcs
 load_dotenv()
 
 year_no = 2024
-month_no = 9
+month_no = 10
 
 delete_query = f"DELETE FROM observations WHERE EXTRACT(year from date) = {year_no} AND EXTRACT(month from date) = {month_no};"
 
