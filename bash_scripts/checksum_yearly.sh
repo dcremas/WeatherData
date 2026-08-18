@@ -10,7 +10,7 @@ Comment
 # The year is the only command line argument that needs to be processed.
 YEAR=$1
 
-NEW_PATH="/Users/dustincremascoli/Documents/website/WeatherData/yearly_files_csv/$YEAR"
+NEW_PATH="/Users/dustincremascoli/projects/WeatherData/yearly_files_csv/$YEAR"
 cd $NEW_PATH
 
 FILE_COUNT=0
