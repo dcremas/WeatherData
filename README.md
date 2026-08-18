@@ -1,51 +1,146 @@
-### Title: Weather Data Portfolio Project, Full Data Pipeline.
+# Weather Data — Full Data Pipeline
 
-*To see the full codebase for this project:*
-[Link to my github account](https://github.com/dcremas/WeatherData)
+*Full codebase:* [github.com/dcremas/WeatherData](https://github.com/dcremas/WeatherData)
 
-#### Description:
+## Description
 
-##### A project intended to build out a full data pipeline for rich location/hourly weather observation metrics from 2005 - till the present day. The purpose is to have a fully updatable Postgres Data Warehouse that can be mined for exploration and analytics on a regular basis.
-##### Purpose:
-
-The ultimate purpose of this project was to produce a clean, historical Data Warehouse of by location, by hour observational weather data to be able to analyze the impact of baromtric pressure changes over time, and in comparison of locations.  The data  warehouse is to serve as the main repository of information to be able to explore and analyze. 
+A full data pipeline building a Postgres data warehouse of hourly, by-location
+weather observations for **112 US airport stations from 2005 to the present day**,
+so that barometric pressure change can be analysed over time and compared across
+locations.
 
 ![pressure_days](output_files/pressure_days.jpg)
 
-##### Data Pipeline Process:
+## Data sources — and the 2025 migration
 
-- Access a rich set of historical by year/by location csv files from the NOAA remote repository.
-- Utilizing Python scripts to ingest the historical files onto my local computer, grabbing only what is necessary for the Data Warehouse.
-- Build out Python scripts to fully clean and transform the data so that it is ready for the Data Warehouse.
-- Harness the full capabilities of SQLAlchemy and the SQLAlchemy ORM to create the schemas for the Postgres Relational Database.
-- Create SQLAlchemy sessions to take the cleaned data and commit to the Postgres Database.
-- Utilize Jupyter notebooks and the pandas and plotly libraries to transform the data from the Warehouse into rich visualizations.
+This project originally sourced NOAA's **Integrated Surface Database (ISD)** via
+the `global-hourly` HTTPS directory. **NOAA superseded ISD in 2025**: nothing was
+published after **2025-08-24**, the legacy directory froze at its 2025-10-01
+state, no `2026/` directory was ever created, and NCEI retired the HTTPS service
+on **2026-07-31**. The AWS mirror `noaa-global-hourly-pds` likewise has no 2026
+data, confirming the dataset was retired rather than merely relocated.
 
-##### Technologies:
+Current observations therefore come from **GHCNh** (Global Historical Climatology
+Network — hourly), ISD's official replacement, read from the NOAA Open Data
+bucket `noaa-ghcnh-pds`. All 112 stations map cleanly: an ISD id is a 6-digit
+USAF id plus a 5-digit WBAN, and the GHCNh id is `USW000` + the same WBAN.
 
-1. Python and various standard library modules.
-2. The Pandas and Numpy third-party packages.
-3. SQLAlchemy and SQLAlchemy ORM.
-3. Postgres database.
-4. Knowledge of data cleaning and tidying.
-5. Advanced SQL techniques including: CTE's, Window Functions and CASE Statements for data analysis and aggregation.
-5. Command Line and Bash Scripting.
+| Period | Source | Notes |
+|---|---|---|
+| 2005 – 2024 | ISD | historical, source now retired |
+| 2025 – present | GHCNh | current; refreshed by re-reading the whole year |
 
-##### Folder Structure:
+Validated against 811,329 overlapping observations: report type matched 100%,
+temperature 99.96%, wind 99.82%, visibility 99.94%, precipitation 99.99%. The
+remaining differences are almost entirely cases where ISD stored an all-9s
+"missing" sentinel that its converters turned into a real-looking number
+(`99999` → `295.30` inHg, `9999` → `2236.7` mph), where GHCNh correctly reports
+NULL.
 
-Main Level: Includes the python scripts, jupyter notebook and bash scripts as well as the folders for the following:
+**Known gap:** GHCNh itself has no data for **2025-08-30, 08-31 or 09-01**, at
+the handover. No source can fill those three days.
 
-- /metadata - helper files created to assist in querying the Data Warehouse.
-- /output_files csv files used for data exploration.
-- /sql - scripts produced for analysis and output.
-- /yearly_files - not committed to the GitHub repo due to amount and size.
+## Pipeline
 
-##### Running the Bash Script:
+```
+NOAA Open Data (noaa-ghcnh-pds)
+  │  ghcnh_generate.py <year>      112 threaded downloads, 329 cols -> 18
+  ▼                                ghcnh_files/<year>/*.parquet
+                                   ghcnh_parquet/<year>/data.parquet
+  │  ghcnh_process.py <year> [month] [local|remote]
+  │    · keeps FM15/FM12 only, normalised to FM-15/FM-12
+  │    · rejects readings GHCNh flags suspect/erroneous (QC 2,3,6,7)
+  │    · converts to F / inHg / mph / miles / inches
+  ▼    · DELETE slice + COPY replacement in ONE transaction
+Postgres  observations
+  │  sql/analytics_slp_decrease.sql   LAG 3/6/24hr sea-level-pressure deltas
+  ▼
+obs_baro_impact  ->  consumed by the bokeh_server visualisations
+```
 
-Not produced yet.
+Reference dimensions load independently: `loc_data.py` (locations),
+`regions_build.py` (regions), `time_zones.py` (time zones).
 
-##### Collaborators:
+### Format differences that matter
 
-Thank you to the National Oceanic and Atmospheric Administration for making all of your rich data available to the masses.
+GHCNh is not a drop-in replacement for ISD. Each of these silently corrupts a
+load if missed, and all are handled in `shared_funcs.py`:
 
-##### Licen
+1. **Units.** ISD packed measurements as integers in tenths; GHCNh publishes real
+   units. Reusing the ISD converters yields values 10× too small. Visibility also
+   changed from metres to kilometres while ceiling height stayed in metres.
+2. **Report types lost their hyphen** — `FM15`/`FM12`, not `FM-15`/`FM-12`. They
+   are normalised back so existing analytics SQL keeps working.
+3. **Provenance is per-variable**, not per row, so `report_type` and `source` are
+   derived from the variables in priority order.
+4. **Quality codes.** GHCNh grades every reading; ISD had no equivalent. Readings
+   flagged suspect or erroneous are stored as NULL — without this a QC-7 reading
+   of 219 °C lands in the warehouse as 426 °F.
+5. **Precipitation is split across accumulation periods.** ISD packed whatever
+   depth was reported into one field, so the period columns are coalesced.
+6. **Source codes are not comparable** across the boundary: GHCNh uses 3-digit
+   codes, ISD used a single digit.
+
+### Loading performance
+
+Loads use `COPY ... FROM STDIN`, not row-wise INSERT. The warehouse is reached
+through an SSH tunnel with ~44 ms latency, where an ORM bulk insert degrades to
+~151 rows/sec — a 1.2M-row year takes over two hours. COPY sustains ~77,000
+rows/sec over the same tunnel, so a full year lands in about 40 seconds. The
+delete and the COPY commit together, so readers never see a half-loaded slice.
+
+## Usage
+
+```bash
+# Refresh the current year end to end
+python ghcnh_generate.py 2026
+python ghcnh_process.py 2026                  # whole year -> remote
+python ghcnh_process.py 2026 7                # July only
+python ghcnh_process.py 2026 7 local          # July only -> local
+
+# Rebuild the analytics table
+./bash_scripts/run_psql.sh
+
+# Verify file record counts against the warehouse
+./bash_scripts/checksum_yearly.sh 2026
+```
+
+Loads refuse to run rather than write bad data: an empty or implausibly short
+batch aborts before the delete, and a completed month whose coverage stops short
+of the month end raises instead of being published as complete.
+
+## Technologies
+
+- Python: `pyarrow`, `polars`, `pandas`, `numpy`
+- `SQLAlchemy` and the SQLAlchemy ORM for schema definition
+- Postgres, loaded via `COPY`
+- Advanced SQL: CTEs, window functions, `CASE` expressions
+- Command line and bash scripting
+
+## Folder structure
+
+Top level holds the Python and bash scripts, plus:
+
+- `/metadata` — helper files, including `stations.csv`, the 112-station ISD↔GHCNh
+  roster the GHCNh scripts read.
+- `/output_files` — exploration output.
+- `/sql` — analysis scripts.
+- `/bash_scripts` — psql runner and record-count checksum.
+- `/ghcnh_files`, `/ghcnh_parquet`, `/yearly_files_csv`, `/yearly_files_parquet` —
+  bulk source data, not committed (size).
+
+### Deprecated
+
+`current_year_generate.py`, `current_year_process.py`, `update_aws_monthly.py`,
+`update_aws_yearly.py` and `explore_files.py` target the retired ISD source. They
+are kept for provenance — this is how 2005–2025 was originally collected — and
+each carries a header saying so. Do not run them against a live warehouse.
+
+## Collaborators
+
+Thank you to the National Oceanic and Atmospheric Administration for making all
+of your rich data available to the masses.
+
+## License
+
+Released under the MIT License.
