@@ -40,6 +40,23 @@ NULL.
 **Known gap:** GHCNh itself has no data for **2025-08-30, 08-31 or 09-01**, at
 the handover. No source can fill those three days.
 
+### ISD sentinel cleanup
+
+ISD encoded a missing reading as an all-9s code rather than NULL, and the original
+loaders converted whatever they found. A missing sea-level pressure therefore
+became `295.30` inHg, a missing wind `2236.7` mph, a missing temperature
+`1831.8` F. `sql/cleanup_isd_sentinels.sql` replaced these with NULL across the
+2005-2024 rows - 2.87M rows locally, 948k on the serving warehouse - bringing the
+historical era in line with how GHCNh reports missing data. The script documents
+each value's derivation and is safe to re-run.
+
+Two things were deliberately left alone: `cig = 13.67` (ISD code 22000 is
+"unlimited ceiling", a real observation) and seven one-off `prp` readings above 20
+inches that are mislabelled multi-hour accumulations rather than sentinels.
+`obs_baro_impact` was verified byte-identical before and after, since the
+sentinels already fell outside its `slp BETWEEN 20 AND 35` and `prp <= 10`
+filters.
+
 ## Pipeline
 
 ```
