@@ -1,14 +1,35 @@
+"""DEPRECATED - loads the ISD parquet built by the retired current_year_generate.py.
+
+Superseded by ghcnh_process.py. See that module for the three format differences
+between ISD and GHCNh, and note this script's ORM bulk insert is the slow path
+that COPY replaced (~151 rows/sec over a 44 ms link versus ~77,000).
+
+Kept for provenance; do not run it against a live warehouse.
+"""
 import time
-from datetime import datetime
+from datetime import date, datetime
 import polars as pl
 from pyspark.sql import SparkSession
-from sqlalchemy import create_engine, insert
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 from database_ddl import Observations
 import shared_funcs
 
-year_no = 2024
+year_no = 2025
+
+# This script reloads the whole of year_no, which for the in-progress year grows
+# as the year does, so a fixed floor would either be useless in January or wrong
+# in December. Completed years run ~1.19M rows across 112 stations, i.e. roughly
+# 3,260 rows/day; require half that per elapsed day so a truncated download is
+# caught while still tolerating a source that lags a few days behind today.
+ROWS_PER_DAY = 3_260
+_elapsed_days = (
+    (date.today() - date(year_no, 1, 1)).days + 1
+    if year_no == date.today().year
+    else 365
+)
+MIN_YEAR_ROWS = int(ROWS_PER_DAY * _elapsed_days * 0.5)
 
 # Deleting the year_no data that is currently in the Postgres Database.
 delete_start_time = time.perf_counter()
@@ -60,7 +81,10 @@ for item in data:
         data_clean.append(temp_dict)
 
 session = Session(bind=engine)
-session.execute(insert(Observations), data_clean)
+inserted = shared_funcs.guarded_insert(
+    session, Observations, data_clean,
+    min_rows=MIN_YEAR_ROWS, label=str(year_no),
+)
 session.commit()
 
 insert_stop_time = time.perf_counter()
@@ -78,6 +102,7 @@ polars_df.write_parquet(f"yearly_files_parquet/{year_no}/data_clean.parquet")
 replicate_stop_time = time.perf_counter()
 total_replicate_time = replicate_stop_time - replicate_start_time
 
+print(f"Inserted {inserted:,} rows for {year_no} (floor was {MIN_YEAR_ROWS:,}).")
 print(f"The total time for the Delete is: {total_delete_time:.2f} seconds.")
 print(f"The total time for the Insert is: {total_insert_time:.2f} seconds.")
 print(f"The total time for the Replicate is: {total_replicate_time:.2f} seconds.")

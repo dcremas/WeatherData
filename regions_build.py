@@ -1,7 +1,7 @@
 import os
 import csv
 from sqlalchemy.orm import declarative_base, Session
-from sqlalchemy import create_engine, insert
+from sqlalchemy import create_engine
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.sql import text
 from dotenv import load_dotenv
@@ -41,6 +41,13 @@ with open('metadata/regions.csv', 'r', newline='') as read_file:
         temp_dict["tz_abbreviation"] = item[3]
         region_data_clean.append(temp_dict)
 
+# One row per state, so the batch should always be 51 (50 + DC). Checked before
+# the DELETE so a mangled regions.csv cannot empty the table.
+MIN_REGION_ROWS = 51
+shared_funcs.require_rows(
+    region_data_clean, min_rows=MIN_REGION_ROWS, label='regions',
+)
+
 delete_query = f"DELETE FROM regions;"
 
 with engine.connect() as connection:
@@ -49,5 +56,10 @@ with engine.connect() as connection:
     connection.commit()
 
 session = Session(bind=engine)
-session.execute(insert(Regions), region_data_clean)
+inserted = shared_funcs.guarded_insert(
+    session, Regions, region_data_clean,
+    min_rows=MIN_REGION_ROWS, label='regions',
+)
 session.commit()
+
+print(f"Inserted {inserted:,} region rows.")

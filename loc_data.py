@@ -1,8 +1,19 @@
+"""Refresh the locations dimension from the NOAA station history file.
+
+CAVEAT: isd-history.csv is part of the retired ISD product and has not been
+updated since 2025-08-30, so this cannot add stations commissioned after that
+date. It still populates the locations table that observations, obs_baro_impact
+and the bokeh apps join against, so it remains in use.
+
+The live equivalent is the GHCNh station list, which metadata/stations.csv is
+built from:
+https://www.ncei.noaa.gov/oa/global-historical-climatology-network/hourly/doc/ghcnh-station-list.txt
+"""
 import os
 import csv
 from datetime import datetime
 import pandas as pd
-from sqlalchemy import create_engine, insert
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 from dotenv import load_dotenv
@@ -44,6 +55,14 @@ url_ext_aws = os.getenv('url_ext_aws')
 url = shared_funcs.database_path()
 engine = create_engine(url=url_ext_aws)
 
+# isd-history.csv has carried ~28,000 usable stations. Check the batch before the
+# DELETE below, so a truncated or empty download can never empty the locations
+# table that observations and obs_baro_impact join against.
+MIN_LOCATION_ROWS = 20_000
+shared_funcs.require_rows(
+    location_data_clean, min_rows=MIN_LOCATION_ROWS, label='locations',
+)
+
 delete_query = f"DELETE FROM locations;"
 
 with engine.connect() as connection:
@@ -52,5 +71,10 @@ with engine.connect() as connection:
     connection.commit()
 
 session = Session(bind=engine)
-session.execute(insert(Locations), location_data_clean)
+inserted = shared_funcs.guarded_insert(
+    session, Locations, location_data_clean,
+    min_rows=MIN_LOCATION_ROWS, label='locations',
+)
 session.commit()
+
+print(f"Inserted {inserted:,} location rows.")

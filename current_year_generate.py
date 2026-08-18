@@ -1,3 +1,14 @@
+"""DEPRECATED - the ISD source this script downloads from is retired.
+
+NOAA superseded the Integrated Surface Database (ISD) and published nothing after
+2025-08-24. https://www.ncei.noaa.gov/data/global-hourly/access/ still answers,
+but every file is frozen at its 2025-10-01 version and there is no 2026
+directory; the AWS mirror noaa-global-hourly-pds has no 2026 prefix either. NCEI
+retired the HTTPS service on 2026-07-31.
+
+Superseded by ghcnh_generate.py, which reads GHCNh from the NOAA Open Data
+bucket. Kept for provenance: this is how 2005-2025 was originally collected.
+"""
 import os
 import time
 import threading
@@ -9,11 +20,11 @@ def download_file(url, filename):
     urllib.request.urlretrieve(url, filename)
 
 
-year_no = 2024
+year_no = 2025
 
 # Create a list of files to download
 url_path = f"https://www.ncei.noaa.gov/data/global-hourly/access/{year_no}/"
-source_path = f"/Users/dustincremascoli/PycharmProjects/WeatherData/yearly_files_csv/{year_no}"
+source_path = f"yearly_files_csv/{year_no}"
 local_path = f"yearly_files_csv/{year_no}/"
 files_to_download =  [
     {"url": f"{url_path}{file.split('.')[0]}.csv",

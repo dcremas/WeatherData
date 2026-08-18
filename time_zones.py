@@ -1,7 +1,7 @@
 import os
 import csv
 from sqlalchemy.orm import declarative_base, Session
-from sqlalchemy import create_engine, insert
+from sqlalchemy import create_engine
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.sql import text
 from dotenv import load_dotenv
@@ -59,6 +59,13 @@ with open('metadata/us_tz_abbrev_clean.csv', 'r', newline='') as read_file:
         temp_dict["utc_offset"] = int(offset[0] + str(int(offset[1])))
         time_zone_data_clean.append(temp_dict)
 
+# The US abbreviation list has held 17 rows. Checked before the DELETE so a
+# mangled source file cannot empty the table.
+MIN_TIME_ZONE_ROWS = 17
+shared_funcs.require_rows(
+    time_zone_data_clean, min_rows=MIN_TIME_ZONE_ROWS, label='time_zones',
+)
+
 delete_query = f"DELETE FROM time_zones;"
 
 with engine.connect() as connection:
@@ -67,5 +74,10 @@ with engine.connect() as connection:
     connection.commit()
 
 session = Session(bind=engine)
-session.execute(insert(TimeZones), time_zone_data_clean)
+inserted = shared_funcs.guarded_insert(
+    session, TimeZones, time_zone_data_clean,
+    min_rows=MIN_TIME_ZONE_ROWS, label='time_zones',
+)
 session.commit()
+
+print(f"Inserted {inserted:,} time zone rows.")

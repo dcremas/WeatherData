@@ -1,7 +1,12 @@
+"""DEPRECATED - reloads a whole year from the retired ISD source.
+
+Superseded by `python ghcnh_process.py <year>`. Kept for provenance; do not run
+it against a live warehouse.
+"""
 import os
 from datetime import datetime
 from pyspark.sql import SparkSession
-from sqlalchemy import create_engine, insert
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 from dotenv import load_dotenv
@@ -11,6 +16,11 @@ import shared_funcs
 load_dotenv()
 
 year_no = 2023
+
+# Plausibility floor for a full year across all 112 stations. Completed years
+# have run 1.15M - 1.25M rows; this only ever needs lowering when deliberately
+# reloading a partial year.
+MIN_YEAR_ROWS = 900_000
 
 delete_query = f"DELETE FROM observations WHERE EXTRACT(year from date) = {year_no};"
 
@@ -54,5 +64,10 @@ for item in data:
         data_clean.append(temp_dict)
 
 session = Session(bind=engine)
-session.execute(insert(Observations), data_clean)
+inserted = shared_funcs.guarded_insert(
+    session, Observations, data_clean,
+    min_rows=MIN_YEAR_ROWS, label=str(year_no),
+)
 session.commit()
+
+print(f"Inserted {inserted:,} rows for {year_no}.")

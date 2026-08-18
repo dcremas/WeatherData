@@ -4,7 +4,7 @@
 
 time_start=$(date +%s)
 
-psql --host=db-aws.cu1h5zzynwdo.us-east-2.rds.amazonaws.com --port=5432 --dbname=weatherdata -f sql/analytics_slp_decrease.sql
+psql --host=127.0.0.1 --port=15432 --dbname=weatherdata -f sql/analytics_slp_decrease.sql
 
 time_stop=$(date +%s)
 
