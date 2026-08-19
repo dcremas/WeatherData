@@ -44,4 +44,16 @@ WHERE obs.station IN ('70381025309', '72290023188', '72530094846', '72494023234'
 CREATE INDEX obs_baro_impact_station
 ON obs_baro_impact(station);
 
+-- Re-granted every rebuild, because DROP TABLE takes the privileges with it and
+-- CREATE TABLE AS makes a fresh table owned by whoever ran the script, with no
+-- grants at all. That was survivable while this was run by hand and someone
+-- noticed the bokeh app had gone blank; run nightly by ghcnhPostgresqlUpdate it
+-- would silently revoke prosite_ro's access the first time it fired.
+--
+-- dustincremascoli is granted explicitly rather than relying on ownership: the
+-- table is owned by ghcnh_etl so that the Lambda can DROP it, which a non-owner
+-- cannot do.
+GRANT SELECT ON obs_baro_impact TO prosite_ro;
+GRANT SELECT ON obs_baro_impact TO dustincremascoli;
+
 COMMIT;
