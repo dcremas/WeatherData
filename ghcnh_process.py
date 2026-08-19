@@ -1,6 +1,6 @@
 """Transform the combined GHCNh parquet into observations rows and load them.
 
-The GHCNh replacement for update_aws_monthly.py / current_year_process.py. Run
+The GHCNh replacement for the retired ISD loaders. Run
 ghcnh_generate.py first to produce ghcnh_parquet/<year_no>/data.parquet.
 
 Set month_no to load a single month (the normal monthly cadence), or leave it as

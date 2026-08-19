@@ -1,6 +1,6 @@
 """Download a year of GHCNh station files and build the combined parquet.
 
-The GHCNh replacement for current_year_generate.py. NOAA superseded ISD with no
+The GHCNh replacement for the retired ISD downloader. NOAA superseded ISD with no
 data published after 2025-08-24, so new observations come from GHCNh on the NOAA
 Open Data bucket instead of the retired ncei.noaa.gov global-hourly directory.
 

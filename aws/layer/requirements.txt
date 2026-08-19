@@ -1,0 +1,12 @@
+# Dependencies for both GHCNh Lambdas, published as one layer.
+#
+# boto3/botocore are deliberately absent: the Lambda runtime already provides
+# them, and bundling a second copy wastes most of the 250 MB unzipped layer
+# budget that pyarrow needs.
+#
+# pyarrow is the whole reason a layer exists. It reads the 329-column GHCNh
+# station files with a column projection, and it is what lets the loader walk the
+# combined parquet one row group at a time instead of materialising 5.9M rows.
+pyarrow==17.0.0
+SQLAlchemy==2.0.35
+psycopg2-binary==2.9.9

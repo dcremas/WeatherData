@@ -202,17 +202,26 @@ Top level holds the Python and bash scripts, plus:
 - `/metadata` — helper files, including `stations.csv`, the 112-station ISD↔GHCNh
   roster the GHCNh scripts read.
 - `/output_files` — exploration output.
-- `/sql` — analysis scripts.
-- `/bash_scripts` — psql runner and record-count checksum.
+- `/sql` — analysis scripts, run both from the command line and by the loader.
+- `/bash_scripts` — psql runner, record-count checksum, manual refresh fallback.
+- `/aws` — the nightly pipeline: two Lambda handlers, the layer manifest and the
+  deploy scripts. See [aws/README.md](aws/README.md).
 - `/ghcnh_files`, `/ghcnh_parquet`, `/yearly_files_csv`, `/yearly_files_parquet` —
   bulk source data, not committed (size).
 
-### Deprecated
+### Removed
 
-`current_year_generate.py`, `current_year_process.py`, `update_aws_monthly.py`,
-`update_aws_yearly.py` and `explore_files.py` target the retired ISD source. They
-are kept for provenance — this is how 2005–2025 was originally collected — and
-each carries a header saying so. Do not run them against a live warehouse.
+The ISD-era loaders — `current_year_generate.py`, `current_year_process.py`,
+`update_aws_monthly.py`, `update_aws_yearly.py` and `explore_files.py` — were
+deleted once the GHCNh path went live. They targeted the `global-hourly` HTTPS
+directory that NCEI retired on 2026-07-31, so none of them can run against any
+source that still exists.
+
+They remain in git history as the record of how 2005–2025 was collected:
+
+```bash
+git show 613ff24:current_year_process.py
+```
 
 ## Collaborators
 

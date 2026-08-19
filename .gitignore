@@ -1,0 +1,39 @@
+# This file is tracked on purpose. It used to list itself, so it stayed
+# untracked and its rules never left this machine - which was survivable while
+# the only things it protected were local clutter, but it now carries the rule
+# that keeps aws/deploy/config.env out of a public repository. A clone without
+# that rule invites committing the real deployment identifiers by accident.
+.env
+.env.bak-*
+/__pycache__/
+/env/
+/config.ini
+/config.py
+.DS_Store
+
+# Bulk source data - too large and too numerous for the repo, as noted in the
+# README. These were previously untracked but not ignored, so they showed up in
+# every git status.
+/yearly_files_csv/
+/yearly_files_parquet/
+/ghcnh_files/
+/ghcnh_parquet/
+/spark-warehouse/
+
+# Local pre-change backups (run_psql.sh.bak-*, README.md.bak-*, .env.bak-*)
+*.bak-*
+
+# Runtime logs from the monthly LaunchAgent
+/logs/
+
+# Real deployment identifiers - AWS account, EC2 host, VPC, subnets, key path.
+# This repository is public; aws/deploy/config.env.example is the committed
+# template. Not credentials, but collectively a map of the infrastructure.
+/aws/deploy/config.env
+
+# Lambda layer build output: 165 MB of manylinux wheels, rebuilt by
+# aws/deploy/01_build_layer.sh from layer/requirements.txt.
+/aws/layer/build/
+/aws/layer/*.zip
+/aws/layer/.layer-arn
+/aws/build/
