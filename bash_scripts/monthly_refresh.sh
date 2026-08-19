@@ -1,12 +1,23 @@
 #!/bin/zsh
 # Monthly GHCNh refresh: load the month that just ended, then rebuild analytics.
 #
-# Replaces the manual cadence that used to run update_aws_monthly.py by hand
-# around the 5th of each month. The old crontab entries were commented out and
-# pointed at ~/PycharmProjects/wd_forecast, which no longer exists, so nothing
-# has been scheduled since.
+# MANUAL FALLBACK ONLY - nothing schedules this any more.
 #
-# Installed by: LaunchAgent com.dustincremascoli.weatherdata-monthly
+# The nightly AWS pipeline supersedes it: EventBridge Scheduler runs
+# ghcnhDownloadS3 at 07:30 and ghcnhPostgresqlUpdate at 07:45 America/Chicago,
+# which rebuild the current and previous months in the EC2 warehouse and refresh
+# obs_baro_impact and loc_subset. LaunchAgent com.dustincremascoli.weatherdata-monthly
+# was unloaded and its plist deleted on 2026-08-19.
+#
+# Keep this for the cases AWS cannot cover:
+#   - the Lambdas are broken or the account is unreachable, and the warehouse
+#     needs a load from a laptop
+#   - a month has to be reloaded from a locally built parquet
+#   - refreshing the LOCAL warehouse, which the AWS pipeline deliberately does
+#     not touch - it has no route back to this machine
+#
+# It still loads BOTH warehouses, so running it by hand also brings the EC2 copy
+# in line. That is safe: it rewrites the same month slice the nightly job does.
 #
 # GHCNh rewrites the whole in-progress year in place rather than publishing
 # deltas, so the download step fetches the entire year of the month being loaded.

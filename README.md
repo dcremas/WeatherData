@@ -78,6 +78,46 @@ obs_baro_impact  ->  consumed by the bokeh_server visualisations
 Reference dimensions load independently: `loc_data.py` (locations),
 `regions_build.py` (regions), `time_zones.py` (time zones).
 
+### Running in AWS, nightly
+
+The pipeline above is what runs by hand. In production it runs itself, once a
+day, as two Lambdas driven by EventBridge Scheduler — the same shape as the
+apple_weatherkit ELT. Deployment source lives in
+`~/Documents/aws/ghcnh_pipeline`.
+
+```
+NOAA noaa-ghcnh-pds
+  │  ghcnhDownloadS3        07:30 America/Chicago   no VPC
+  ▼                         112 parquets -> combined, staged, promoted
+s3://noaa-ghcnh-weatherdata/ghcnh_parquet/<year>/data.parquet
+  │  ghcnhPostgresqlUpdate  07:45 America/Chicago   in VPC
+  ▼                         current + previous month -> observations
+EC2 Postgres  ->  obs_baro_impact, loc_subset  ->  bokeh apps
+```
+
+Daily because GHCNh republishes the whole in-progress year daily, with about a
+two-day lag. The window is the **current and previous month**, not just the
+current one: GHCNh keeps revising recent observations, and a current-month-only
+job would stop looking at the previous month the moment it rolled over.
+
+The two functions sit on opposite sides of the VPC out of necessity. NOAA's
+bucket is in us-east-1, this VPC's only S3 route is a us-east-2 gateway endpoint
+and there is no NAT gateway — so the downloader cannot be in the VPC, and the
+loader must be, because the warehouse listens on a private address.
+
+The Lambdas run **this repo's** `shared_funcs.py` and `sql/*.sql`, copied into
+the layer and the function package at deploy time, so there is one implementation
+of the transform rather than a fork. A fix here reaches production by rebuilding
+the layer.
+
+**The EC2 warehouse is now the system of record.** The nightly job has no route
+back to this machine, so the local copy is a dev copy — refresh it on demand
+with `python ghcnh_process.py <year> <month> local`.
+
+`bash_scripts/monthly_refresh.sh` and its LaunchAgent are retired; the script is
+kept as the manual fallback for when AWS is unavailable or the local warehouse
+needs feeding.
+
 ### Format differences that matter
 
 GHCNh is not a drop-in replacement for ISD. Each of these silently corrupts a
@@ -97,6 +137,21 @@ load if missed, and all are handled in `shared_funcs.py`:
    depth was reported into one field, so the period columns are coalesced.
 6. **Source codes are not comparable** across the boundary: GHCNh uses 3-digit
    codes, ISD used a single digit.
+
+### Transform performance
+
+`ghcnh_transform` reads the combined parquet **one row group at a time** and
+pushes the report-type and period filters down onto the Arrow table before
+converting anything to Python.
+
+It used to call `table.to_pydict()` on the whole file and loop over every row —
+correct, but it materialised all 5.9M rows across 32 columns as Python objects in
+order to keep the ~50k that survive the filters. That peaked at **4.4 GB and 130
+seconds** for a single month, which no Lambda would host. Filtering in Arrow
+first leaves the per-row mapping byte-identical while holding one row group in
+memory: **924 MB and 7.7 seconds** for a two-month window, 24-50x faster on a
+month. A whole-year load is unchanged, since almost every row survives the filter
+and there is nothing to push down.
 
 ### Loading performance
 

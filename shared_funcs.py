@@ -130,76 +130,154 @@ GHCNH_PRECIP_ORDER = [
 ]
 
 
-def ghcnh_transform(parquet_path, year_no, month_no=None):
-    """Turn a combined GHCNh parquet into observations-shaped dicts.
+def _period_prefixes(periods):
+    """ISO date prefixes for the (year, month) periods a load covers.
 
-    Shared by ghcnh_process.py and the validation tooling so there is exactly one
-    implementation of the GHCNh -> observations mapping.
+    month is None for a whole year. GHCNh writes DATE as an ISO string, so a
+    period test is a cheap string prefix rather than a parse of all 5.9M rows.
+    """
+    prefixes = []
+    for year_no, month_no in periods:
+        if month_no is None:
+            prefixes.append(f"{year_no}-")
+        else:
+            prefixes.append(f"{year_no}-{month_no:02d}-")
+    return prefixes
+
+
+def ghcnh_row(row, report_type_cols, source_cols):
+    """Map one GHCNh row to an observations-shaped dict.
+
+    Split out of ghcnh_transform so the streaming reader and any validation
+    tooling share exactly one implementation of the mapping. Callers must have
+    already established that the row is an FM-12/FM-15 in the wanted period.
     """
     from datetime import datetime
-    import pyarrow.parquet as pq
 
-    def first_non_null(row, columns):
+    def first_non_null(columns):
         for column in columns:
             value = row.get(column)
             if value is not None:
                 return value
         return None
 
-    def checked(row, column):
+    def checked(column):
         """The reading, or None when GHCNh flagged it suspect or erroneous."""
         if row.get(f'{column}_Quality_Code') in GHCNH_REJECT_QUALITY_CODES:
             return None
         return row.get(column)
 
-    def first_checked(row, columns):
+    def first_checked(columns):
         for column in columns:
-            value = checked(row, column)
+            value = checked(column)
             if value is not None:
                 return value
         return None
 
-    report_type_cols = [
-        f"{name}_Report_Type" for name in GHCNH_PROVENANCE_ORDER
-    ]
-    source_cols = [f"{name}_Source_Code" for name in GHCNH_PROVENANCE_ORDER]
+    report_type = first_non_null(report_type_cols)
 
-    table = pq.read_table(parquet_path)
-    columns = table.to_pydict()
+    temp_dict = dict()
+    temp_dict["station"] = row['isd_station']
+    temp_dict["date"] = datetime.strptime(row['DATE'], '%Y-%m-%dT%H:%M:%S')
+    temp_dict["source"] = first_non_null(source_cols)
+    temp_dict["report_type"] = GHCNH_KEEP_REPORT_TYPES[report_type]
+    temp_dict["wnd"] = ghcnh_wind_mph(checked('wind_speed'))
+    temp_dict["cig"] = ghcnh_ceiling_miles(checked('ceiling_height'))
+    temp_dict["vis"] = ghcnh_visibility_miles(checked('visibility'))
+    temp_dict["tmp"] = ghcnh_temp_f(checked('temperature'))
+    temp_dict["dew"] = ghcnh_temp_f(checked('dew_point_temperature'))
+    temp_dict["slp"] = ghcnh_pressure_hg(checked('sea_level_pressure'))
+    temp_dict["prp"] = ghcnh_precip_inches(first_checked(GHCNH_PRECIP_ORDER))
 
-    data_clean = list()
+    return temp_dict
 
-    for index in range(table.num_rows):
-        row = {name: columns[name][index] for name in columns}
 
-        report_type = first_non_null(row, report_type_cols)
-        if report_type not in GHCNH_KEEP_REPORT_TYPES:
-            continue
+def ghcnh_transform(parquet_source, year_no=None, month_no=None, periods=None):
+    """Turn a combined GHCNh parquet into observations-shaped dicts.
 
-        observed_at = datetime.strptime(row['DATE'], '%Y-%m-%dT%H:%M:%S')
-        if observed_at.year != year_no:
-            continue
-        if month_no is not None and observed_at.month != month_no:
-            continue
+    Shared by ghcnh_process.py, the Lambda loader and the validation tooling so
+    there is exactly one implementation of the GHCNh -> observations mapping.
 
-        temp_dict = dict()
-        temp_dict["station"] = row['isd_station']
-        temp_dict["date"] = observed_at
-        temp_dict["source"] = first_non_null(row, source_cols)
-        temp_dict["report_type"] = GHCNH_KEEP_REPORT_TYPES[report_type]
-        temp_dict["wnd"] = ghcnh_wind_mph(checked(row, 'wind_speed'))
-        temp_dict["cig"] = ghcnh_ceiling_miles(checked(row, 'ceiling_height'))
-        temp_dict["vis"] = ghcnh_visibility_miles(checked(row, 'visibility'))
-        temp_dict["tmp"] = ghcnh_temp_f(checked(row, 'temperature'))
-        temp_dict["dew"] = ghcnh_temp_f(checked(row, 'dew_point_temperature'))
-        temp_dict["slp"] = ghcnh_pressure_hg(checked(row, 'sea_level_pressure'))
-        temp_dict["prp"] = ghcnh_precip_inches(
-            first_checked(row, GHCNH_PRECIP_ORDER)
+    parquet_source is anything pyarrow can open - a path, or a file-like object,
+    which is how the Lambda streams the object straight out of S3 without
+    staging it on disk.
+
+    Pass either (year_no, month_no) for a single period, or periods as a list of
+    (year, month) tuples - which is what the nightly load uses to rebuild the
+    current and previous months together. month None means the whole year.
+
+    Reads one row group at a time and pushes the report-type and period filters
+    down onto the Arrow table BEFORE converting anything to Python. The previous
+    version called table.to_pydict() on the whole file and looped over every
+    row: correct, but it materialised all 5.9M rows x 32 columns as Python
+    objects to keep the ~50k that survive the filters, peaking at 4.4 GB and
+    taking 130 seconds. Filtering in Arrow first keeps the row logic identical
+    while holding one row group in memory at a time.
+
+    Returns (rows_read, records).
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    if periods is None:
+        if year_no is None:
+            raise ValueError("ghcnh_transform needs year_no or periods.")
+        periods = [(year_no, month_no)]
+
+    prefixes = _period_prefixes(periods)
+
+    parquet_file = pq.ParquetFile(parquet_source)
+    schema_names = set(parquet_file.schema_arrow.names)
+
+    # Mirrors the dict.get() lookups the row logic uses: a provenance column the
+    # generator does not download is skipped, not an error. visibility_Source_Code
+    # is exactly that case - GHCNh publishes it, ghcnh_generate.py does not select
+    # it, and the original code silently fell through to None.
+    report_type_cols = [f"{name}_Report_Type" for name in GHCNH_PROVENANCE_ORDER
+                        if f"{name}_Report_Type" in schema_names]
+    source_cols = [f"{name}_Source_Code" for name in GHCNH_PROVENANCE_ORDER
+                   if f"{name}_Source_Code" in schema_names]
+
+    if not report_type_cols:
+        raise RuntimeError(
+            f"{parquet_source}: none of the expected *_Report_Type columns are "
+            f"present, so no row can be classified as FM-12/FM-15."
         )
 
-        data_clean.append(temp_dict)
+    keep_types = pa.array(list(GHCNH_KEEP_REPORT_TYPES))
 
-    return table.num_rows, data_clean
+    row_total = 0
+    data_clean = list()
+
+    for group_no in range(parquet_file.num_row_groups):
+        table = parquet_file.read_row_group(group_no)
+        row_total += table.num_rows
+
+        report_type = table[report_type_cols[0]]
+        for column in report_type_cols[1:]:
+            report_type = pc.coalesce(report_type, table[column])
+        mask = pc.is_in(report_type, value_set=keep_types)
+
+        date_column = table['DATE']
+        period_mask = pc.starts_with(date_column, pattern=prefixes[0])
+        for prefix in prefixes[1:]:
+            period_mask = pc.or_(
+                period_mask, pc.starts_with(date_column, pattern=prefix)
+            )
+
+        # fill_null: a null DATE or report type is "not in this period", the
+        # same outcome the row-at-a-time version reached by falling through.
+        table = table.filter(pc.fill_null(pc.and_(mask, period_mask), False))
+        if table.num_rows == 0:
+            continue
+
+        columns = table.to_pydict()
+        for index in range(table.num_rows):
+            row = {name: columns[name][index] for name in columns}
+            data_clean.append(ghcnh_row(row, report_type_cols, source_cols))
+
+    return row_total, data_clean
 
 
 # Column order used by copy_observations. `id` is omitted so the sequence default
@@ -428,6 +506,106 @@ def guarded_insert(session, model, records, min_rows=1, label='load'):
         )
 
     return len(records)
+
+
+def load_window(today=None, months_back=1):
+    """The (year, month) periods a nightly load rebuilds.
+
+    The daily job reloads the current month AND the month before it, rather than
+    the current month alone. GHCNh keeps revising recent observations - late
+    arrivals and corrected readings land days after the hour they describe - and
+    a current-month-only job stops looking at those revisions the moment the
+    month rolls over, so a correction published on the 2nd for the 30th would
+    never be picked up. Reloading two months costs a few extra seconds of COPY.
+
+    Returns oldest first, and crosses the year boundary correctly: on any day in
+    January the window is [(prev_year, 12), (year, 1)], which is why the download
+    step fetches two years' files in January.
+    """
+    from datetime import date
+
+    if today is None:
+        today = date.today()
+
+    periods = []
+    year_no, month_no = today.year, today.month
+    for _step in range(months_back + 1):
+        periods.append((year_no, month_no))
+        month_no -= 1
+        if month_no == 0:
+            year_no, month_no = year_no - 1, 12
+
+    return list(reversed(periods))
+
+
+def window_bounds(periods):
+    """(start, end) datetimes covering periods, end exclusive.
+
+    Used for the DELETE that precedes the reload. A half-open range on `date`
+    uses idx_observations_date, where the EXTRACT(year ...)/EXTRACT(month ...)
+    predicates the monthly loader uses cannot.
+    """
+    from datetime import datetime
+
+    first_year, first_month = periods[0]
+    last_year, last_month = periods[-1]
+
+    start = datetime(first_year, first_month, 1)
+    if last_month == 12:
+        end = datetime(last_year + 1, 1, 1)
+    else:
+        end = datetime(last_year, last_month + 1, 1)
+
+    return start, end
+
+
+def verify_window_freshness(engine, start, end, max_lag_days=3, now=None):
+    """Check that a freshly loaded window actually reaches close to today.
+
+    verify_month_coverage() answers "did this completed month reach its end",
+    which is the right question for the monthly loader but the wrong one for a
+    nightly run: the current month is incomplete by definition, and on the 1st
+    the previous month is not published yet either. The question that holds every
+    day is whether the newest observation is recent - which is exactly what a
+    stalled upstream source stops being. NOAA publishes GHCNh with roughly a
+    two-day lag, so three days is the smallest threshold that does not alarm on
+    a healthy feed.
+
+    Returns (row_count, min_date, max_date); raises if the window is empty or
+    the newest row is older than max_lag_days.
+    """
+    from datetime import datetime
+    from sqlalchemy.sql import text
+
+    if now is None:
+        now = datetime.now()
+
+    select_query = (
+        "SELECT count(*), min(date), max(date) FROM observations "
+        "WHERE date >= :start AND date < :end"
+    )
+
+    with engine.connect() as connection:
+        statement = text(select_query)
+        row_count, min_date, max_date = connection.execute(
+            statement, {"start": start, "end": end}
+        ).one()
+
+    if not row_count:
+        raise RuntimeError(
+            f"{start:%Y-%m-%d} to {end:%Y-%m-%d}: no rows present after load."
+        )
+
+    lag_days = (now - max_date).days
+    if lag_days > max_lag_days:
+        raise RuntimeError(
+            f"{start:%Y-%m-%d} to {end:%Y-%m-%d}: loaded {row_count:,} rows but "
+            f"the newest observation is {max_date} - {lag_days} days old, past "
+            f"the {max_lag_days}-day threshold. GHCNh has most likely stopped "
+            f"publishing; do not treat this load as current."
+        )
+
+    return row_count, min_date, max_date
 
 
 def verify_month_coverage(engine, year_no, month_no, max_gap_days=2):
