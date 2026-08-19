@@ -14,21 +14,51 @@ locations.
 ## Data sources — and the 2025 migration
 
 This project originally sourced NOAA's **Integrated Surface Database (ISD)** via
-the `global-hourly` HTTPS directory. **NOAA superseded ISD in 2025**: nothing was
-published after **2025-08-24**, the legacy directory froze at its 2025-10-01
-state, no `2026/` directory was ever created, and NCEI retired the HTTPS service
-on **2026-07-31**. The AWS mirror `noaa-global-hourly-pds` likewise has no 2026
-data, confirming the dataset was retired rather than merely relocated.
+the `global-hourly` HTTPS directory. **NOAA stopped adding to ISD in 2025**:
+observations stop in late August 2025, and no `2026/` directory was ever created.
+
+The archive itself is still served — `https://www.ncei.noaa.gov/data/global-hourly/access/`
+lists `1901/` onward and returns the historical years fine. What ended is new
+data, not the service, so a pipeline pointed at it fails by silently reading a
+year that never grows rather than by getting an error. The AWS mirror
+`noaa-global-hourly-pds` tells the same story: its year prefixes stop at `2025/`.
 
 Current observations therefore come from **GHCNh** (Global Historical Climatology
-Network — hourly), ISD's official replacement, read from the NOAA Open Data
-bucket `noaa-ghcnh-pds`. All 112 stations map cleanly: an ISD id is a 6-digit
-USAF id plus a 5-digit WBAN, and the GHCNh id is `USW000` + the same WBAN.
+Network — hourly), ISD's official replacement. All 112 stations map cleanly: an
+ISD id is a 6-digit USAF id plus a 5-digit WBAN, and the GHCNh id is `USW000` +
+the same WBAN.
 
 | Period | Source | Notes |
 |---|---|---|
-| 2005 – 2024 | ISD | historical, source now retired |
+| 2005 – 2024 | ISD | historical; source no longer updated |
 | 2025 – present | GHCNh | current; refreshed by re-reading the whole year |
+
+### Where the data comes from
+
+Documentation and station metadata:
+[ncei.noaa.gov/products/global-historical-climatology-network-hourly](https://www.ncei.noaa.gov/products/global-historical-climatology-network-hourly)
+
+The files this pipeline reads live in the NOAA Open Data bucket
+`noaa-ghcnh-pds`, which needs no credentials. It publishes the same observations
+two ways, `by-station` and `by-year`; the loaders use `by-year`:
+
+```
+https://noaa-ghcnh-pds.s3.amazonaws.com/hourly/access/by-year/<year>/parquet/GHCNh_<ghcnh_id>_<year>.parquet
+```
+
+For example, Chicago O'Hare (ISD `72530094846`) in 2026:
+
+```
+https://noaa-ghcnh-pds.s3.amazonaws.com/hourly/access/by-year/2026/parquet/GHCNh_USW00094846_2026.parquet
+```
+
+`metadata/stations.csv` holds the ISD ↔ GHCNh id pairs for all 112 stations, and
+is what both `ghcnh_generate.py` and the download Lambda iterate over.
+
+**GHCNh republishes the whole in-progress year in place** rather than publishing
+deltas, so there is no incremental fetch — refreshing means re-reading the year.
+It also revises recent observations after the fact, which is why the nightly load
+rebuilds two months rather than one.
 
 Validated against 811,329 overlapping observations: report type matched 100%,
 temperature 99.96%, wind 99.82%, visibility 99.94%, precipitation 99.99%. The
@@ -214,8 +244,9 @@ Top level holds the Python and bash scripts, plus:
 The ISD-era loaders — `current_year_generate.py`, `current_year_process.py`,
 `update_aws_monthly.py`, `update_aws_yearly.py` and `explore_files.py` — were
 deleted once the GHCNh path went live. They targeted the `global-hourly` HTTPS
-directory that NCEI retired on 2026-07-31, so none of them can run against any
-source that still exists.
+directory, which still serves its historical years but has received no new data
+since August 2025 and has no `2026/` — so running them now would quietly load a
+stale year rather than fail.
 
 They remain in git history as the record of how 2005–2025 was collected:
 
