@@ -110,6 +110,12 @@ the layer and the function package at deploy time, so there is one implementatio
 of the transform rather than a fork. A fix here reaches production by rebuilding
 the layer.
 
+Failure is quiet by design: every guard refuses to write rather than writing
+something wrong, so a broken run leaves the warehouse serving good but *stale*
+data and nothing downstream looks different. CloudWatch alarms on both functions,
+plus one that fires if the loader stops running at all, publish to the
+`ghcnh-pipeline-alerts` SNS topic.
+
 **The EC2 warehouse is now the system of record.** The nightly job has no route
 back to this machine, so the local copy is a dev copy — refresh it on demand
 with `python ghcnh_process.py <year> <month> local`.
