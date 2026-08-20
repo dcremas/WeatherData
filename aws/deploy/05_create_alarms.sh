@@ -71,6 +71,19 @@ else
     echo "subscribed ${ALERT_EMAIL} - CONFIRM THE EMAIL or nothing is delivered"
 fi
 
+# A 5-minute period, not the 24-hour one the schedule might suggest. The pipeline
+# runs once a day, so a daily window looks like the natural fit, but it breaks
+# alerting in two ways. It delays detection by up to a day; and, worse, SNS
+# notifies on state TRANSITIONS, so an alarm already sitting in ALARM is silent
+# when the next failure arrives. A multi-day upstream outage - NOAA withholding
+# data, which has happened - pins the alarm high, and a genuinely different
+# failure behind it then delivers nothing. That is the same silent-alerting trap
+# the apple_weatherkit pipeline hit in August 2026, and why its error alarms use
+# 300 too.
+#
+# At 300s each day's failure fires its own notification and clears about five
+# minutes later, so consecutive failures each alert. The liveness alarm below
+# keeps its 86400 period: that one genuinely wants a 24-hour window.
 error_alarm() {
     local function_name="$1" description="$2"
     aws cloudwatch put-metric-alarm \
@@ -78,7 +91,7 @@ error_alarm() {
         --alarm-description "${description}" \
         --namespace AWS/Lambda --metric-name Errors \
         --dimensions "Name=FunctionName,Value=${function_name}" \
-        --statistic Sum --period 86400 --evaluation-periods 1 \
+        --statistic Sum --period 300 --evaluation-periods 1 \
         --threshold 1 --comparison-operator GreaterThanOrEqualToThreshold \
         --treat-missing-data notBreaching \
         --alarm-actions "${TOPIC_ARN}" --ok-actions "${TOPIC_ARN}" \
