@@ -34,11 +34,10 @@ combined_path = f"ghcnh_parquet/{year_no}"
 MEASURE_COLS = [
     'temperature', 'dew_point_temperature', 'sea_level_pressure',
     'wind_speed', 'visibility', 'ceiling_height',
-    # GHCNh splits precipitation across accumulation periods, where ISD packed
-    # whatever depth was reported into the single AA1 field. All the period
-    # columns are needed so ghcnh_transform can coalesce them back into one
-    # depth; reading only 'precipitation' loses roughly 640 readings per station
-    # per year to synoptic-hour multi-hour totals.
+    # GHCNh splits precipitation across accumulation periods. Only the 1-hour
+    # 'precipitation' column feeds prp (see GHCNH_PRECIP_COLUMN in
+    # shared_funcs.py); the 3-24 hour totals overlap it and are kept in the
+    # parquet only so a multi-hour series can be built later as its own column.
     'precipitation', 'precipitation_3_hour', 'precipitation_6_hour',
     'precipitation_12_hour', 'precipitation_24_hour',
 ]

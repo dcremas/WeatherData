@@ -87,6 +87,47 @@ inches that are mislabelled multi-hour accumulations rather than sentinels.
 sentinels already fell outside its `slp BETWEEN 20 AND 35` and `prp <= 10`
 filters.
 
+### Precipitation double counting (fixed 2026-10-12)
+
+`prp` is the rain in the hour ending at each report, so `SUM(prp)` over a
+station's rows is its total. Until 2026-10-12 it was not: the FM-12 (synoptic)
+rows carried 3, 6, 12 and 24 hour accumulations that overlap the FM-15 hourly
+amounts -- the ISD loaders stored AA1 whatever its period, and the GHCNh loader
+coalesced the period columns -- so the median station-year came out **2.5x** NOAA's
+official total (Seattle 2022: 89.82 in against 40.98).
+
+The fix, against NOAA's Global Summary of the Year (`validate_precip.py`):
+
+| | median station-year | within 5% | within 10% |
+|---|---|---|---|
+| before | +155.5% | 10% | 13% |
+| after  | -0.1% | 85% | 95% |
+
+1. `shared_funcs.py` keeps only the 1-hour amount, on FM-15 rows (`GHCNH_PRECIP_COLUMN`).
+2. `sql/fix_precip_double_count.sql` sets FM-12 `prp` to NULL before 2025, with a
+   backup table (`prp_fm12_backup_20261012`) and `sql/fix_precip_double_count_undo.sql`.
+3. 2025 and 2026 are reloaded with the fixed loader -- the GHCNh-era FM-15 rows
+   were inflated too, by the coalesce, and only a reload recovers the 1-hour value.
+4. `obs_baro_impact` is rebuilt; it reads FM-15 rows only and its pre-2025 rows
+   are byte-identical before and after.
+5. The Lambda layer is rebuilt (`aws/deploy/01_build_layer.sh`, then
+   `02_deploy_functions.sh`) BEFORE the reload, or the nightly two-month rebuild
+   puts the old values back.
+
+**What it does not fix -- known precipitation limits:**
+
+- **A missing hourly amount is stored as 0.0.** A gauge outage therefore reads as
+  a dry month: Shreveport 2025 shows 0.00 in for nine months its hourly reports
+  carry no amount, against 57.85 in official for the year.
+- **Occasional bad hourly values pass GHCNh's QC.** Duluth November 2025 holds a
+  3.74 in hour and 14.37 in for the month, against 1.28 official.
+- **A few ISD-era FM-15 rows still carry a multi-hour amount** (Seattle 2024 runs
+  6-7% high; Little Rock AFB 2022-2024 50-87%). They cannot be told apart in the
+  stored data; reloading those years' `prp` from GHCNh would fix them exactly.
+
+Run `python validate_precip.py [local|remote] [first_year] [last_year]` after any
+reload; it lists the worst station-years.
+
 ## Pipeline
 
 ```
@@ -169,8 +210,10 @@ load if missed, and all are handled in `shared_funcs.py`:
 4. **Quality codes.** GHCNh grades every reading; ISD had no equivalent. Readings
    flagged suspect or erroneous are stored as NULL — without this a QC-7 reading
    of 219 °C lands in the warehouse as 426 °F.
-5. **Precipitation is split across accumulation periods.** ISD packed whatever
-   depth was reported into one field, so the period columns are coalesced.
+5. **Precipitation is split across accumulation periods.** Only the 1-hour
+   `precipitation` column, on FM-15 rows, becomes `prp`; FM-12 rows get NULL.
+   The 3-24 hour totals overlap the hourly amounts, and mixing them in counted
+   the same rain two or three times -- see *Precipitation double counting* below.
 6. **Source codes are not comparable** across the boundary: GHCNh uses 3-digit
    codes, ISD used a single digit.
 

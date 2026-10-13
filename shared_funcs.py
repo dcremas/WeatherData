@@ -119,15 +119,25 @@ GHCNH_PROVENANCE_ORDER = [
 # equivalent signal, which is part of why the pre-2025 rows contain sentinels.
 GHCNH_REJECT_QUALITY_CODES = {'2', '3', '6', '7'}
 
-# Precipitation columns in ascending accumulation period. ISD carried a single
-# AA1 depth whose period the old loaders ignored, so the closest match to the
-# historical series is the shortest period actually reported. Without this
-# coalesce, synoptic-hour rows that report only a 3, 6 or 24 hour total would be
-# written as 0.0 inches.
-GHCNH_PRECIP_ORDER = [
-    'precipitation', 'precipitation_3_hour', 'precipitation_6_hour',
-    'precipitation_12_hour', 'precipitation_24_hour',
-]
+# prp is the ONE-HOUR precipitation from the hourly METAR (FM-15), and nothing
+# else. FM-12 rows get NULL.
+#
+# GHCNh also publishes 3, 6, 12 and 24 hour accumulations, carried mostly by the
+# synoptic FM-12 reports. They overlap the hourly amounts, so this column used to
+# coalesce them in and every total counted the same rain several times: Seattle's
+# 2025 came out at 100.60 inches against NOAA's official 33.06 (GHCN-Daily,
+# USW00024233). Keeping only the 1-hour column on FM-15 rows gives 33.46, and
+# Miami, Denver and Chicago O'Hare agree with GHCN-Daily the same way. With this
+# rule, summing prp over a station's rows IS its precipitation total.
+#
+# FM-12 rows are NULL rather than 0.0 so that a per-row reader cannot mistake
+# "this report carries no 1-hour amount" for "it did not rain".
+# analytics_slp_decrease.sql reads FM-15 rows only, so its `prp <= 10.00`
+# filter never sees those NULLs. The multi-hour columns are still downloaded
+# (ghcnh_generate.py) in case a 6- or 24-hour series is ever wanted -- as its own
+# column, never mixed into this one. sql/fix_precip_double_count.sql applies
+# the same rule to the ISD-era rows already in the warehouse.
+GHCNH_PRECIP_COLUMN = 'precipitation'
 
 
 def _period_prefixes(periods):
@@ -167,13 +177,6 @@ def ghcnh_row(row, report_type_cols, source_cols):
             return None
         return row.get(column)
 
-    def first_checked(columns):
-        for column in columns:
-            value = checked(column)
-            if value is not None:
-                return value
-        return None
-
     report_type = first_non_null(report_type_cols)
 
     temp_dict = dict()
@@ -187,7 +190,8 @@ def ghcnh_row(row, report_type_cols, source_cols):
     temp_dict["tmp"] = ghcnh_temp_f(checked('temperature'))
     temp_dict["dew"] = ghcnh_temp_f(checked('dew_point_temperature'))
     temp_dict["slp"] = ghcnh_pressure_hg(checked('sea_level_pressure'))
-    temp_dict["prp"] = ghcnh_precip_inches(first_checked(GHCNH_PRECIP_ORDER))
+    temp_dict["prp"] = (ghcnh_precip_inches(checked(GHCNH_PRECIP_COLUMN))
+                        if report_type == 'FM15' else None)
 
     return temp_dict
 
