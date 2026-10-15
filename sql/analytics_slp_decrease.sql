@@ -55,5 +55,9 @@ ON obs_baro_impact(station);
 -- cannot do.
 GRANT SELECT ON obs_baro_impact TO prosite_ro;
 GRANT SELECT ON obs_baro_impact TO dustincremascoli;
+-- mcp_ro reads this table through the MCP server's text-to-SQL tool. It is in
+-- the same position prosite_ro was in: granted once by hand, then silently
+-- revoked by the first rebuild that ran without this line.
+GRANT SELECT ON obs_baro_impact TO mcp_ro;
 
 COMMIT;
