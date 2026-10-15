@@ -153,8 +153,8 @@ Reference dimensions load independently: `loc_data.py` (locations),
 
 The pipeline above is what runs by hand. In production it runs itself, once a
 day, as two Lambdas driven by EventBridge Scheduler — the same shape as the
-apple_weatherkit ELT. Deployment source lives in
-`~/Documents/aws/ghcnh_pipeline`.
+apple_weatherkit ELT. Deployment source lives in this repo under `aws/`
+(see `aws/README.md`).
 
 ```
 NOAA noaa-ghcnh-pds

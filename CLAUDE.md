@@ -56,5 +56,4 @@ you touched. The repo is not ruff-format clean — never bulk-format.
 - `database_ddl.py` uses `default=datetime.now()` (evaluated at import); `copy_observations` sets the
   timestamp explicitly — keep it that way.
 - Rebuilding `obs_baro_impact` drops one-off grants; `sql/analytics_slp_decrease.sql` re-grants `mcp_ro`.
-- Known stale bits: `README.md` still says deployment source is `~/Documents/aws/ghcnh_pipeline` (it is
-  this repo), and `bash_scripts/run_psql.sh` has a broken shebang (`#/bin/zsh`).
+- `bash_scripts/run_psql.sh` rebuilds `obs_baro_impact` on the live DB through the tunnel — not a dry run.

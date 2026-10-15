@@ -1,4 +1,4 @@
-#/bin/zsh
+#!/bin/zsh
 
 # A place to run postgres sequel scripts from commands.
 
