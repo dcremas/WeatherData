@@ -60,4 +60,25 @@ GRANT SELECT ON obs_baro_impact TO dustincremascoli;
 -- revoked by the first rebuild that ran without this line.
 GRANT SELECT ON obs_baro_impact TO mcp_ro;
 
+-- Re-commented every rebuild, for the same reason as the grants: DROP TABLE takes
+-- the COMMENTs with it. The MCP server's list_schema/describe_table hand these to
+-- the text-to-SQL model, and its selftest fails "every table carries a
+-- description" without them -- which is how the loss was found, 2026-10-25.
+-- The text is kept in step with comment_tables.sql in weather-sql-explorer/mcp_server
+-- (which applies it by hand); no row count in it, since the count changes every load.
+COMMENT ON TABLE obs_baro_impact IS
+    'Derived: per-station sea-level-pressure change over 3, 6 and 24 hours, '
+    'for the subset of stations the barometric visualisation plots '
+    '(NOT all 112). Rebuilt from observations on every load, so it is a '
+    'convenience table -- the same numbers can be computed from observations with '
+    'window functions. Deltas are in INCHES OF MERCURY; negative means falling '
+    'pressure, which is the storm-approach signal.';
+COMMENT ON COLUMN obs_baro_impact.slp_3hr_diff IS
+    'Sea-level pressure change over the previous 3 hours, in inHg. Negative = '
+    'falling.';
+COMMENT ON COLUMN obs_baro_impact.slp_6hr_diff IS
+    'Sea-level pressure change over the previous 6 hours, in inHg.';
+COMMENT ON COLUMN obs_baro_impact.slp_24hr_diff IS
+    'Sea-level pressure change over the previous 24 hours, in inHg.';
+
 COMMIT;
