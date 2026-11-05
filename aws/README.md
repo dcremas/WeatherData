@@ -114,9 +114,9 @@ Run order on a clean account: `04` → `00` → `01` → `02` → `03` → `05`.
 ## The transform lives in the repo, not here
 
 `01_build_layer.sh` copies `shared_funcs.py` out of
-`~/projects/WeatherData` into the layer. The Lambdas run the same transform,
+the repository root into the layer. The Lambdas run the same transform,
 converters, quality-code rejects and COPY writer that `python ghcnh_process.py`
-runs on the laptop — there is no second implementation to drift. The loader
+runs in a development checkout — there is no second implementation to drift. The loader
 likewise runs the repo's own `sql/analytics_slp_decrease.sql` and
 `sql/extend_loc_subset.sql`, copied into its package at deploy time.
 

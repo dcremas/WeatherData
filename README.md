@@ -76,7 +76,7 @@ ISD encoded a missing reading as an all-9s code rather than NULL, and the origin
 loaders converted whatever they found. A missing sea-level pressure therefore
 became `295.30` inHg, a missing wind `2236.7` mph, a missing temperature
 `1831.8` F. `sql/cleanup_isd_sentinels.sql` replaced these with NULL across the
-2005-2024 rows - 2.87M rows locally, 948k on the serving warehouse - bringing the
+2005-2024 rows - 2.87M rows in the development copy, 948k on the EC2 warehouse - bringing the
 historical era in line with how GHCNh reports missing data. The script documents
 each value's derivation and is safe to re-run.
 
@@ -188,12 +188,12 @@ data and nothing downstream looks different. CloudWatch alarms on both functions
 plus one that fires if the loader stops running at all, publish to the
 `ghcnh-pipeline-alerts` SNS topic.
 
-**The EC2 warehouse is now the system of record.** The nightly job has no route
-back to this machine, so the local copy is a dev copy — refresh it on demand
-with `python ghcnh_process.py <year> <month> local`.
+**The EC2 warehouse is the system of record.** The nightly job writes only there;
+a development copy is refreshed on demand with
+`python ghcnh_process.py <year> <month> local`.
 
-`bash_scripts/monthly_refresh.sh` and its LaunchAgent are retired; the script is
-kept as the manual fallback for when AWS is unavailable or the local warehouse
+`bash_scripts/monthly_refresh.sh` and its scheduled job are retired; the script is
+kept as the manual fallback for when AWS is unavailable or a development copy
 needs feeding.
 
 ### Format differences that matter
