@@ -166,10 +166,11 @@ s3://noaa-ghcnh-weatherdata/ghcnh_parquet/<year>/data.parquet
 EC2 Postgres  ->  obs_baro_impact, loc_subset  ->  bokeh apps
 ```
 
-Daily because GHCNh republishes the whole in-progress year daily, with about a
-two-day lag. The window is the **current and previous month**, not just the
-current one: GHCNh keeps revising recent observations, and a current-month-only
-job would stop looking at the previous month the moment it rolled over.
+Daily because GHCNh republishes the whole in-progress year in place: daily and
+about two days behind until September 2026, every 1-4 days since. The window is
+the **current and previous month**, not just the current one: GHCNh keeps
+revising recent observations, and a current-month-only job would stop looking at
+the previous month the moment it rolled over.
 
 The two functions sit on opposite sides of the VPC out of necessity. NOAA's
 bucket is in us-east-1, this VPC's only S3 route is a us-east-2 gateway endpoint

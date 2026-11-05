@@ -46,8 +46,8 @@ you touched. The repo is not ruff-format clean — never bulk-format.
 - Downloader Lambda must stay OUTSIDE the VPC (no NAT; NOAA is reachable only publicly); loader must be INSIDE.
 - Schedules are 07:30 / 07:45 America/Chicago; `load_window` uses `date.today()`, which is UTC on Lambda.
 - Load guards (`aws/README.md`): min row/station counts, coverage must not shrink vs `manifest.json`,
-  DELETE+COPY in one transaction, 3-day freshness check (`GHCNH_MAX_LAG_DAYS`). Don't weaken them to
-  make a load pass.
+  DELETE+COPY in one transaction, freshness check (`GHCNH_MAX_LAG_DAYS`=4: fires at 5+ days; was 3
+  until 2026-11-05, see `verify_window_freshness`). Don't weaken them to make a load pass.
 - Lambda DB password comes from S3 at cold start (SSM is canonical but unreachable from the VPC). The layer
   has no `.env` and the Lambdas never call dotenv.
 - Units: °F / inHg / mph / miles / inches. GHCNh is real units; ISD stored tenths. QC codes 2/3/6/7 → NULL.

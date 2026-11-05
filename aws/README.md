@@ -38,8 +38,10 @@ Same split as `awkApiCallS3` (no VPC) and `awkPostgresqlUpdate` (VPC).
 
 ## Why daily, and why two months
 
-GHCNh republishes the whole in-progress year in place, once a day, with roughly a
-two-day lag. Daily is exactly the rate at which new data appears.
+GHCNh republishes the whole in-progress year in place. It did so daily, about two
+days behind, until September 2026; since then it updates every 1-4 days. A daily
+run picks up each update the morning after it lands, and a day with nothing new
+is a cheap no-op.
 
 Each run rebuilds the **current and previous month**. GHCNh keeps revising recent
 observations, and a current-month-only job stops looking at the previous month

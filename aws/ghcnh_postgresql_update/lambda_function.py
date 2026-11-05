@@ -39,7 +39,11 @@ S3_CURRENT_PREFIX = 'ghcnh_parquet/'
 # A two-month window is 150-200k rows across 112 stations. The floor is set well
 # below that but far above anything a broken source would produce.
 MIN_WINDOW_ROWS = int(os.environ.get('GHCNH_MIN_WINDOW_ROWS', '60000'))
-MAX_LAG_DAYS = int(os.environ.get('GHCNH_MAX_LAG_DAYS', '3'))
+# Whole days, compared with `>`: 4 fires once the newest row is 5+ days old.
+# Raised from 3 on 2026-11-05 -- see verify_window_freshness() in
+# shared_funcs.py. The default matters: 02_deploy_functions.sh does not set
+# this variable, so a redeploy falls back to it.
+MAX_LAG_DAYS = int(os.environ.get('GHCNH_MAX_LAG_DAYS', '4'))
 
 SQL_DIR = os.path.join(os.path.dirname(__file__), 'sql')
 ANALYTICS_SQL = 'analytics_slp_decrease.sql'

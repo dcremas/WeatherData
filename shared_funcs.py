@@ -563,7 +563,7 @@ def window_bounds(periods):
     return start, end
 
 
-def verify_window_freshness(engine, start, end, max_lag_days=3, now=None):
+def verify_window_freshness(engine, start, end, max_lag_days=4, now=None):
     """Check that a freshly loaded window actually reaches close to today.
 
     verify_month_coverage() answers "did this completed month reach its end",
@@ -571,9 +571,17 @@ def verify_window_freshness(engine, start, end, max_lag_days=3, now=None):
     nightly run: the current month is incomplete by definition, and on the 1st
     the previous month is not published yet either. The question that holds every
     day is whether the newest observation is recent - which is exactly what a
-    stalled upstream source stops being. NOAA publishes GHCNh with roughly a
-    two-day lag, so three days is the smallest threshold that does not alarm on
-    a healthy feed.
+    stalled upstream source stops being.
+
+    The lag is counted in whole days and compared with `>`, so max_lag_days=4
+    raises once the newest row is 5 or more days old. It was 3 until
+    2026-11-05. In August 2026 NOAA republished daily, about 45 h behind, and 3
+    fit. From September it republished every 1-4 days, so a healthy feed reached
+    ~96 h before the next update and tripped 3 on six of the eight days it fired
+    between 2026-08-21 and 2026-11-04. At 4, the same history fires only on the
+    one real stall (nothing published 2026-09-30 to 10-08), a day later than 3
+    did. A trip matters beyond the alert: the downstream rebuilds below are
+    skipped, so the bokeh apps fall a day behind data that is in fact current.
 
     Returns (row_count, min_date, max_date); raises if the window is empty or
     the newest row is older than max_lag_days.
